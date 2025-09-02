@@ -6,11 +6,16 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "fetch-satellites": "node scripts/fetch-satellites.js",
+    "fetch-satellites:force": "node scripts/fetch-satellites.js --force",
+    "fetch-satellites:all": "node scripts/fetch-satellites.js --categories=active,starlink,gnss,weather,geo,iridium,amateur",
+    "test-simplified": "node scripts/test-simplified-api.js"
   },
   "dependencies": {
     "@deck.gl/core": "^9.1.14",
     "@deck.gl/layers": "^9.1.14",
+    "@deck.gl/mapbox": "^9.1.14",
     "@deck.gl/react": "^9.1.14",
     "deck.gl": "^9.1.14",
     "mapbox-gl": "^3.14.0",

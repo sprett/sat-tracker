@@ -1,15 +1,13 @@
 "use client";
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
-// deck.gl no longer used for points; we render via native Mapbox layers for globe compatibility
-// (keep import stubs if needed in future)
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { ScatterplotLayer } from "@deck.gl/layers";
-import { useSatellites } from "@/app/hooks/useSatellites";
+import { useSatellitesSimplified } from "@/app/hooks/useSatellitesSimplified";
 
-interface GlobeProps {
+interface GlobeSimplifiedProps {
   className?: string;
 }
 
@@ -22,12 +20,9 @@ interface SatellitePosition {
     lon: number;
     alt: number;
   };
-  velocity: {
-    x: number;
-    y: number;
-    z: number;
-  };
   visible: boolean;
+  launchDate?: string;
+  intDesignator?: string;
 }
 
 interface N2YOPosition {
@@ -50,18 +45,21 @@ const INITIAL_VIEW_STATE = {
 
 // Color mapping for different satellite categories
 const CATEGORY_COLORS: Record<string, [number, number, number, number]> = {
-  active: [255, 255, 255, 255], // White
   starlink: [0, 255, 0, 255], // Green
-  gnss: [0, 0, 255, 255], // Blue
+  iss: [255, 255, 255, 255], // White
+  gps: [0, 0, 255, 255], // Blue
   weather: [255, 165, 0, 255], // Orange
   noaa: [255, 0, 0, 255], // Red
-  geo: [255, 0, 255, 255], // Magenta
+  geostationary: [255, 0, 255, 255], // Magenta
   iridium: [0, 255, 255, 255], // Cyan
-  amateur: [255, 255, 0, 255], // Yellow
+  "amateur-radio": [255, 255, 0, 255], // Yellow
+  military: [128, 0, 128, 255], // Purple
   default: [128, 128, 128, 255], // Gray
 };
 
-export default function Globe({ className = "" }: GlobeProps) {
+export default function GlobeSimplified({
+  className = "",
+}: GlobeSimplifiedProps) {
   const [viewState, setViewState] = useState(INITIAL_VIEW_STATE);
   const [selectedSatellite, setSelectedSatellite] =
     useState<SatellitePosition | null>(null);
@@ -70,14 +68,23 @@ export default function Globe({ className = "" }: GlobeProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
-  const [observer, setObserver] = useState({ lat: 0, lon: 0, alt: 0 });
   const [track, setTrack] = useState<N2YOPosition[] | null>(null);
 
-  const { satellites, loading, error, lastUpdate, categories, setCategories } =
-    useSatellites({
-      categories: ["active", "starlink", "gnss"],
-      updateInterval: 2000, // Update every 2 seconds
-    });
+  const {
+    satellites,
+    loading,
+    error,
+    lastUpdate,
+    categories,
+    setCategories,
+    observerPosition,
+    setObserverPosition,
+  } = useSatellitesSimplified({
+    categories: ["starlink", "iss", "gps", "weather"],
+    updateInterval: 300000, // 5 minutes
+    observerPosition: { lat: 0, lon: 0, alt: 0 },
+    searchRadius: 90,
+  });
 
   const handleViewStateChange = useCallback(
     ({ viewState }: { viewState: any }) => {
@@ -104,6 +111,7 @@ export default function Globe({ className = "" }: GlobeProps) {
 
       map.current.on("load", () => {
         console.log("Map with satellite style loaded successfully");
+
         // Add sources/layers for ground track and selected sat, and init deck.gl overlay
         if (!map.current!.getSource("satellites")) {
           map.current!.addSource("satellites", {
@@ -135,12 +143,12 @@ export default function Globe({ className = "" }: GlobeProps) {
                   lon: f.geometry.coordinates[0],
                   alt: 0,
                 },
-                velocity: { x: 0, y: 0, z: 0 },
                 visible: true,
               });
             }
           });
         }
+
         if (!map.current!.getSource("groundtrack")) {
           map.current!.addSource("groundtrack", {
             type: "geojson",
@@ -195,14 +203,15 @@ export default function Globe({ className = "" }: GlobeProps) {
           },
         });
         map.current!.addControl(overlayRef.current);
+
         if (!map.current) return;
         const c = map.current.getCenter();
-        setObserver({ lat: c.lat, lon: c.lng, alt: 0 });
+        setObserverPosition({ lat: c.lat, lon: c.lng, alt: 0 });
       });
 
       map.current.on("moveend", () => {
         const c = map.current!.getCenter();
-        setObserver((o) => ({ ...o, lat: c.lat, lon: c.lng }));
+        setObserverPosition((o) => ({ ...o, lat: c.lat, lon: c.lng }));
       });
 
       map.current.on("error", (e) => {
@@ -222,7 +231,7 @@ export default function Globe({ className = "" }: GlobeProps) {
         map.current = null;
       }
     };
-  }, [MAPBOX_ACCESS_TOKEN]);
+  }, [MAPBOX_ACCESS_TOKEN, setObserverPosition]);
 
   // Convert satellite data to deck.gl format
   const satelliteData = satellites.map((sat) => ({
@@ -256,7 +265,6 @@ export default function Globe({ className = "" }: GlobeProps) {
           noradId: d.noradId,
           category: d.category,
           position: { lat: d.position[1], lon: d.position[0], alt: d.altitude },
-          velocity: { x: 0, y: 0, z: 0 },
           visible: d.visible,
         });
       },
@@ -284,7 +292,6 @@ export default function Globe({ className = "" }: GlobeProps) {
   }, [satelliteData]);
 
   // Selected satellite ground track + current point
-  // Update Mapbox line/circle for selected satellite track
   useEffect(() => {
     if (!map.current) return;
     const lineSrc = map.current.getSource("groundtrack") as any;
@@ -335,7 +342,7 @@ export default function Globe({ className = "" }: GlobeProps) {
         return;
       }
       try {
-        const url = `/api/satellites/n2yo?endpoint=positions&noradId=${selectedSatellite.noradId}&observerLat=${observer.lat}&observerLon=${observer.lon}&observerAlt=${observer.alt}&seconds=240`;
+        const url = `/api/satellites/n2yo?endpoint=positions&noradId=${selectedSatellite.noradId}&observerLat=${observerPosition.lat}&observerLon=${observerPosition.lon}&observerAlt=${observerPosition.alt}&seconds=240`;
         const res = await fetch(url);
         if (!res.ok) return;
         const json = await res.json();
@@ -348,9 +355,12 @@ export default function Globe({ className = "" }: GlobeProps) {
     return () => {
       abort = true;
     };
-  }, [selectedSatellite, observer.lat, observer.lon, observer.alt]);
-
-  // No overlay sync needed; Mapbox layers are updated via effects above
+  }, [
+    selectedSatellite,
+    observerPosition.lat,
+    observerPosition.lon,
+    observerPosition.alt,
+  ]);
 
   return (
     <div
@@ -364,6 +374,10 @@ export default function Globe({ className = "" }: GlobeProps) {
           Last Update:{" "}
           {lastUpdate ? new Date(lastUpdate).toLocaleTimeString() : "Never"}
         </div>
+        <div>
+          Observer: {observerPosition.lat.toFixed(2)}°,{" "}
+          {observerPosition.lon.toFixed(2)}°
+        </div>
         {loading && <div>Loading...</div>}
         {error && <div className="text-red-400">Error: {error}</div>}
       </div>
@@ -371,7 +385,16 @@ export default function Globe({ className = "" }: GlobeProps) {
       {/* Category filter */}
       <div className="absolute top-4 right-4 z-10 bg-black bg-opacity-50 text-white p-3 rounded-lg text-sm">
         <div className="mb-2">Categories:</div>
-        {["active", "starlink", "gnss", "weather", "geo"].map((cat) => (
+        {[
+          "starlink",
+          "iss",
+          "gps",
+          "weather",
+          "noaa",
+          "iridium",
+          "amateur-radio",
+          "military",
+        ].map((cat) => (
           <label key={cat} className="block">
             <input
               type="checkbox"
@@ -405,6 +428,9 @@ export default function Globe({ className = "" }: GlobeProps) {
             <div>
               Status: {selectedSatellite.visible ? "Visible" : "Not Visible"}
             </div>
+            {selectedSatellite.launchDate && (
+              <div>Launch: {selectedSatellite.launchDate}</div>
+            )}
           </div>
           <button
             onClick={() => setSelectedSatellite(null)}
@@ -421,8 +447,6 @@ export default function Globe({ className = "" }: GlobeProps) {
         className="w-full h-full"
         style={{ minHeight: "100vh" }}
       />
-
-      {/* DeckGL overlay is attached to Mapbox via MapboxOverlay */}
     </div>
   );
 }
