@@ -311,7 +311,33 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
           },
         };
 
+        // Post object payload for compatibility
         self.postMessage(response);
+
+        // Prepare and post Float32Array buffer of [lat, lon, altKm] triples
+        try {
+          const triples = new Float32Array(positions.length * 3);
+          for (let i = 0; i < positions.length; i++) {
+            const p = positions[i].position;
+            const base = i * 3;
+            triples[base + 0] = p.lat;
+            triples[base + 1] = p.lon;
+            triples[base + 2] = p.alt; // km
+          }
+          // Post as transferable for performance
+          // @ts-ignore - structured clone with transfer list
+          (self as any).postMessage(
+            {
+              type: "POSITIONS_F32",
+              data: {
+                buffer: triples.buffer,
+                count: positions.length,
+                timestamp,
+              },
+            },
+            [triples.buffer as any]
+          );
+        } catch {}
         break;
 
       default:

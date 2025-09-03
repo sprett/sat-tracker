@@ -69,6 +69,7 @@ export default function GlobeSimplified({
   const map = useRef<mapboxgl.Map | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const [track, setTrack] = useState<N2YOPosition[] | null>(null);
+  const [zoom, setZoom] = useState(1);
 
   const {
     satellites,
@@ -123,7 +124,22 @@ export default function GlobeSimplified({
             type: "circle",
             source: "satellites",
             paint: {
-              "circle-radius": 3,
+              // Grow points with zoom so they appear larger when zoomed in
+              "circle-radius": [
+                "interpolate",
+                ["exponential", 1.6],
+                ["zoom"],
+                0,
+                1.5,
+                3,
+                3,
+                6,
+                8,
+                10,
+                14,
+                14,
+                22,
+              ],
               "circle-color": "#ffeb3b",
               "circle-stroke-color": "#ffffff",
               "circle-stroke-width": 0.5,
@@ -211,8 +227,15 @@ export default function GlobeSimplified({
 
       map.current.on("moveend", () => {
         const c = map.current!.getCenter();
-        setObserverPosition((o) => ({ ...o, lat: c.lat, lon: c.lng }));
+        setObserverPosition({ lat: c.lat, lon: c.lng, alt: 0 });
       });
+
+      map.current.on("zoom", () => {
+        setZoom(map.current!.getZoom());
+      });
+
+      // Initialize zoom state
+      setZoom(map.current.getZoom());
 
       map.current.on("error", (e) => {
         console.error("Map error:", e);
@@ -253,8 +276,10 @@ export default function GlobeSimplified({
       id: "satellite-points",
       data: satelliteData,
       pickable: true,
-      radiusMinPixels: 2,
-      radiusMaxPixels: 6,
+      radiusUnits: "pixels",
+      getRadius: (_d: any) => {
+        return Math.min(20, 2 + Math.pow(1.6, zoom));
+      },
       getPosition: (d: any) => [d.position[0], d.position[1]],
       getFillColor: (d: any) => d.color,
       onClick: (info: any) => {
@@ -271,6 +296,7 @@ export default function GlobeSimplified({
       updateTriggers: {
         getPosition: satelliteData,
         getFillColor: satelliteData,
+        getRadius: zoom,
       },
     });
 

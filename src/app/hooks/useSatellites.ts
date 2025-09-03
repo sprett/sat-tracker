@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useSatellitePositionsStore } from "@/app/state/satelliteStore";
 
 interface SatelliteData {
   name: string;
@@ -75,6 +76,7 @@ export function useSatellites(
   const workerRef = useRef<Worker | null>(null);
   const satelliteDataRef = useRef<SatelliteData[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastCategoriesRef = useRef<string>("");
 
   // Initialize Web Worker
   useEffect(() => {
@@ -99,6 +101,20 @@ export function useSatellites(
               setSatellites(data.positions);
               setLastUpdate(data.timestamp);
               setError(null);
+            }
+            break;
+
+          case "POSITIONS_F32":
+            if (data && data.buffer && typeof data.count === "number") {
+              try {
+                const f32 = new Float32Array(data.buffer as ArrayBuffer);
+                useSatellitePositionsStore
+                  .getState()
+                  .setPositionsF32(f32, data.count);
+                setLastUpdate(data.timestamp ?? Date.now());
+              } catch (e) {
+                console.error("Failed to process POSITIONS_F32", e);
+              }
             }
             break;
 
@@ -128,8 +144,10 @@ export function useSatellites(
       setError(null);
 
       const categoriesParam = categories.join(",");
+      const categoriesChanged = lastCategoriesRef.current !== categoriesParam;
+      const forceParam = categoriesChanged ? "&force=true" : "";
       const response = await fetch(
-        `/api/satellites/fetch-tle?categories=${categoriesParam}&compressed=false`
+        `/api/satellites/fetch-tle?categories=${categoriesParam}&compressed=false${forceParam}`
       );
 
       if (!response.ok) {
@@ -144,6 +162,7 @@ export function useSatellites(
 
       satelliteDataRef.current = satelliteData;
       console.log(`Loaded ${satelliteData.length} satellites`);
+      lastCategoriesRef.current = categoriesParam;
       // Immediately trigger a propagation so UI updates without waiting for the next tick
       if (workerRef.current && satelliteDataRef.current.length > 0) {
         workerRef.current.postMessage({

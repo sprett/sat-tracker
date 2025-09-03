@@ -61,6 +61,38 @@ const CATEGORY_COLORS: Record<string, [number, number, number, number]> = {
   default: [128, 128, 128, 255], // Gray
 };
 
+// Full set of groups we fetch for the main globe
+const ALL_GROUPS: string[] = [
+  "active",
+  "starlink",
+  "gnss",
+  "weather",
+  "noaa",
+  "geo",
+  "iridium",
+  "iridiumNEXT",
+  "visual",
+  "amateur",
+  "x_comm",
+  "other_comm",
+  "gorizont",
+  "raduga",
+  "molniya",
+  "gps_ops",
+  "glonass",
+  "galileo",
+  "beidou",
+  "sbas",
+  "nnss",
+  "moscow",
+  "intelsat",
+  "ses",
+  "iridium_33_debris",
+  "cosmos_2251_debris",
+  "last_30_days",
+  "stations",
+];
+
 export default function Globe({ className = "" }: GlobeProps) {
   const [viewState, setViewState] = useState(INITIAL_VIEW_STATE);
   const [selectedSatellite, setSelectedSatellite] =
@@ -72,12 +104,17 @@ export default function Globe({ className = "" }: GlobeProps) {
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const [observer, setObserver] = useState({ lat: 0, lon: 0, alt: 0 });
   const [track, setTrack] = useState<N2YOPosition[] | null>(null);
+  const [zoom, setZoom] = useState(1);
 
-  const { satellites, loading, error, lastUpdate, categories, setCategories } =
-    useSatellites({
-      categories: ["active", "starlink", "gnss"],
-      updateInterval: 2000, // Update every 2 seconds
-    });
+  const { satellites, loading, error, lastUpdate } = useSatellites({
+    categories: ALL_GROUPS,
+    updateInterval: 2000, // Update every 2 seconds
+  });
+
+  // Client-side visibility filtering (does not re-fetch)
+  const [visibleCategorySet, setVisibleCategorySet] = useState<Set<string>>(
+    new Set(ALL_GROUPS)
+  );
 
   const handleViewStateChange = useCallback(
     ({ viewState }: { viewState: any }) => {
@@ -115,7 +152,22 @@ export default function Globe({ className = "" }: GlobeProps) {
             type: "circle",
             source: "satellites",
             paint: {
-              "circle-radius": 3,
+              // Grow points with zoom so they appear larger when zoomed in
+              "circle-radius": [
+                "interpolate",
+                ["exponential", 1.6],
+                ["zoom"],
+                0,
+                1.5,
+                3,
+                3,
+                6,
+                8,
+                10,
+                14,
+                14,
+                22,
+              ],
               "circle-color": "#ffeb3b",
               "circle-stroke-color": "#ffffff",
               "circle-stroke-width": 0.5,
@@ -205,6 +257,13 @@ export default function Globe({ className = "" }: GlobeProps) {
         setObserver((o) => ({ ...o, lat: c.lat, lon: c.lng }));
       });
 
+      map.current.on("zoom", () => {
+        setZoom(map.current!.getZoom());
+      });
+
+      // Initialize zoom state
+      setZoom(map.current.getZoom());
+
       map.current.on("error", (e) => {
         console.error("Map error:", e);
       });
@@ -236,16 +295,23 @@ export default function Globe({ className = "" }: GlobeProps) {
     visible: sat.visible,
   }));
 
+  const filteredData = satelliteData.filter((d: any) =>
+    visibleCategorySet.has(d.category)
+  );
+
   // Update deck.gl layer when data updates
   useEffect(() => {
     if (!overlayRef.current) return;
 
     const layer = new ScatterplotLayer({
       id: "satellite-points",
-      data: satelliteData,
+      data: filteredData,
       pickable: true,
-      radiusMinPixels: 2,
-      radiusMaxPixels: 6,
+      radiusUnits: "pixels",
+      getRadius: (_d: any) => {
+        // Exponential growth with zoom, clamped to a sensible maximum
+        return Math.min(20, 2 + Math.pow(1.6, zoom));
+      },
       getPosition: (d: any) => [d.position[0], d.position[1]],
       getFillColor: (d: any) => d.color,
       onClick: (info: any) => {
@@ -261,27 +327,28 @@ export default function Globe({ className = "" }: GlobeProps) {
         });
       },
       updateTriggers: {
-        getPosition: satelliteData,
-        getFillColor: satelliteData,
+        getPosition: filteredData,
+        getFillColor: filteredData,
+        getRadius: zoom,
       },
     });
 
     overlayRef.current.setProps({ layers: [layer] });
-  }, [satelliteData]);
+  }, [filteredData, zoom]);
 
   // Also push features into Mapbox GeoJSON source as a fallback/parallel render
   useEffect(() => {
     if (!map.current) return;
     const src = map.current.getSource("satellites") as any;
     if (!src) return;
-    const features = satelliteData.map((d: any) => ({
+    const features = filteredData.map((d: any) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: [d.position[0], d.position[1]] },
       properties: { name: d.name, noradId: d.noradId, category: d.category },
     }));
     const fc = { type: "FeatureCollection", features } as any;
     src.setData(fc);
-  }, [satelliteData]);
+  }, [filteredData]);
 
   // Selected satellite ground track + current point
   // Update Mapbox line/circle for selected satellite track
@@ -296,16 +363,34 @@ export default function Globe({ className = "" }: GlobeProps) {
       return;
     }
 
+    // Split line at anti-meridian to avoid long wrap lines
     const lineCoords = track.map((p) => [p.satlongitude, p.satlatitude]);
+    const segments: number[][][] = [];
+    let currentSegment: number[][] = [];
+    for (let i = 0; i < lineCoords.length; i++) {
+      const pt = lineCoords[i];
+      const prev = i > 0 ? lineCoords[i - 1] : null;
+      if (
+        prev &&
+        Math.abs(pt[0] - prev[0]) > 180 // crossing anti-meridian
+      ) {
+        if (currentSegment.length > 0) segments.push(currentSegment);
+        currentSegment = [pt];
+      } else {
+        currentSegment.push(pt);
+      }
+    }
+    if (currentSegment.length > 0) segments.push(currentSegment);
+
     const lineFc = {
       type: "FeatureCollection",
-      features: [
-        {
+      features: segments
+        .filter((seg) => seg.length > 1)
+        .map((seg) => ({
           type: "Feature",
-          geometry: { type: "LineString", coordinates: lineCoords },
+          geometry: { type: "LineString", coordinates: seg },
           properties: {},
-        },
-      ],
+        })),
     } as any;
     lineSrc.setData(lineFc);
 
@@ -335,7 +420,9 @@ export default function Globe({ className = "" }: GlobeProps) {
         return;
       }
       try {
-        const url = `/api/satellites/n2yo?endpoint=positions&noradId=${selectedSatellite.noradId}&observerLat=${observer.lat}&observerLon=${observer.lon}&observerAlt=${observer.alt}&seconds=240`;
+        // Request close to a full orbit worth of points
+        const seconds = 5400; // 90 minutes
+        const url = `/api/satellites/n2yo?endpoint=positions&noradId=${selectedSatellite.noradId}&observerLat=${observer.lat}&observerLon=${observer.lon}&observerAlt=${observer.alt}&seconds=${seconds}`;
         const res = await fetch(url);
         if (!res.ok) return;
         const json = await res.json();
@@ -359,7 +446,7 @@ export default function Globe({ className = "" }: GlobeProps) {
     >
       {/* Status bar */}
       <div className="absolute top-4 left-4 z-10 bg-black bg-opacity-50 text-white p-3 rounded-lg text-sm">
-        <div>Satellites: {satellites.length}</div>
+        <div>Satellites: {filteredData.length}</div>
         <div>
           Last Update:{" "}
           {lastUpdate ? new Date(lastUpdate).toLocaleTimeString() : "Never"}
@@ -371,23 +458,42 @@ export default function Globe({ className = "" }: GlobeProps) {
       {/* Category filter */}
       <div className="absolute top-4 right-4 z-10 bg-black bg-opacity-50 text-white p-3 rounded-lg text-sm">
         <div className="mb-2">Categories:</div>
-        {["active", "starlink", "gnss", "weather", "geo"].map((cat) => (
+        {ALL_GROUPS.map((cat) => (
           <label key={cat} className="block">
             <input
               type="checkbox"
-              checked={categories.includes(cat)}
+              checked={visibleCategorySet.has(cat)}
               onChange={(e) => {
-                if (e.target.checked) {
-                  setCategories([...categories, cat]);
-                } else {
-                  setCategories(categories.filter((c) => c !== cat));
-                }
+                setVisibleCategorySet((prev) => {
+                  const next = new Set(prev);
+                  if (e.target.checked) {
+                    next.add(cat);
+                  } else {
+                    next.delete(cat);
+                  }
+                  return next;
+                });
               }}
               className="mr-2"
             />
             {cat}
           </label>
         ))}
+
+        <div className="mt-2 flex gap-2">
+          <button
+            className="px-2 py-1 bg-gray-600 rounded text-xs hover:bg-gray-500"
+            onClick={() => setVisibleCategorySet(new Set(ALL_GROUPS))}
+          >
+            Select all
+          </button>
+          <button
+            className="px-2 py-1 bg-gray-600 rounded text-xs hover:bg-gray-500"
+            onClick={() => setVisibleCategorySet(new Set())}
+          >
+            Select none
+          </button>
+        </div>
       </div>
 
       {/* Selected satellite info */}

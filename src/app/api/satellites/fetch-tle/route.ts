@@ -3,6 +3,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { gzip } from "zlib";
 import { promisify } from "util";
+import { createHash } from "crypto";
 
 const gzipAsync = promisify(gzip);
 
@@ -176,9 +177,20 @@ export async function GET(request: NextRequest) {
 
     console.log(`Fetching TLE data for categories: ${categories.join(", ")}`);
 
+    // Build a cache key based on the requested category set so different
+    // combinations don't collide in a single cache file
+    const categoriesKey = categories.slice().sort().join(",");
+    const categoriesHash = createHash("sha1")
+      .update(categoriesKey)
+      .digest("hex")
+      .slice(0, 12);
+
     // Check if we have recent data (less than 6 hours old)
     const dataDir = path.join(process.cwd(), "data");
-    const cacheFile = path.join(dataDir, "satellites.json.gz");
+    const cacheFile = path.join(
+      dataDir,
+      `satellites-${categoriesHash}.json.gz`
+    );
 
     if (!force) {
       try {
@@ -248,7 +260,10 @@ export async function GET(request: NextRequest) {
     console.log(`Total satellites fetched: ${allSatellites.length}`);
 
     // Save compressed data
-    await saveCompressedData(allSatellites, "satellites.json.gz");
+    await saveCompressedData(
+      allSatellites,
+      `satellites-${categoriesHash}.json.gz`
+    );
 
     // Return response based on compression preference
     const jsonData = JSON.stringify(allSatellites);
