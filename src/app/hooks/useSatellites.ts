@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useSatellitePositionsStore } from "@/app/state/satelliteStore";
+import {
+  useSatellitePositionsStore,
+  useSatelliteDetailsStore,
+} from "@/app/state/satelliteStore";
 
 interface SatelliteData {
   name: string;
@@ -99,6 +102,9 @@ export function useSatellites(
                 console.log("Worker POSITIONS:", data.count);
               } catch {}
               setSatellites(data.positions);
+              useSatelliteDetailsStore
+                .getState()
+                .setSatelliteData(data.positions);
               setLastUpdate(data.timestamp);
               setError(null);
             }
