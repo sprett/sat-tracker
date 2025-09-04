@@ -9,7 +9,7 @@ import { useSatellites } from "@/app/hooks/useSatellites";
 
 function Earth() {
   const colorMap = useTexture(
-    "https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
+    "https://unpkg.com/three-globe@2.44.0/example/img/earth-day.jpg"
   );
   return (
     <group>
@@ -55,13 +55,19 @@ export default function ThreeGlobe() {
     <div className="w-full h-screen" style={{ background: "#000011" }}>
       <Canvas camera={{ position: [0, 0, 3], fov: 45 }}>
         <color attach="background" args={["#000011"]} />
-        <ambientLight intensity={0.5} />
-        <directionalLight position={[5, 3, 5]} intensity={1.0} />
+        <ambientLight intensity={0.8} />
+        <directionalLight position={[5, 3, 5]} intensity={1.2} />
         <Suspense fallback={null}>
           <Earth />
           <Satellites />
         </Suspense>
-        <OrbitControls enableDamping dampingFactor={0.1} />
+        <OrbitControls
+          enableDamping
+          dampingFactor={0.05}
+          zoomSpeed={0.3}
+          minDistance={1.5}
+          maxDistance={14}
+        />
       </Canvas>
     </div>
   );
