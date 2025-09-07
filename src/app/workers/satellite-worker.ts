@@ -69,7 +69,6 @@ function parseTLE(satellite: SatelliteData) {
     satelliteCache.set(cacheKey, satrec);
     return satrec;
   } catch (error) {
-    console.error(`Error parsing TLE for ${satellite.name}:`, error);
     return null;
   }
 }
@@ -158,15 +157,6 @@ function propagateSatellites(
         !isFinite((satrec as any).ecco) ||
         !isFinite((satrec as any).inclo)
       ) {
-        if (debugLogged < 3) {
-          try {
-            console.warn(
-              "Invalid satrec from TLE:",
-              satellite.name,
-              satellite.tle
-            );
-          } catch {}
-        }
         continue;
       }
 
@@ -179,11 +169,6 @@ function propagateSatellites(
         !isFinite((positionAndVelocity as any).position.y) ||
         !isFinite((positionAndVelocity as any).position.z)
       ) {
-        if (debugLogged < 3) {
-          try {
-            console.warn("SGP4 returned invalid ECI for:", satellite.name);
-          } catch {}
-        }
         continue;
       }
 
@@ -200,18 +185,6 @@ function propagateSatellites(
       const gmst = gstime(date);
       const posEcf = eciToEcf(positionAndVelocity.position, gmst);
       let geodetic = ecefToGeodetic(posEcf.x, posEcf.y, posEcf.z);
-      if (debugLogged < 3) {
-        try {
-          console.log(
-            "eci:",
-            positionAndVelocity.position,
-            "gmst:",
-            gmst,
-            "geodetic:",
-            geodetic
-          );
-        } catch {}
-      }
       // Fallback via ECF if needed
       // no fallback needed; computed above
       // Optional: convert velocity to ECF for reference
@@ -263,9 +236,6 @@ function propagateSatellites(
 
   try {
     // Basic debug log visible in worker console
-    console.log(
-      `propagate debug: parsed=${parsedCount}, propagated=${propagatedCount}, geodetic=${geodeticCount}, positions=${positions.length}`
-    );
   } catch {}
   return positions;
 }

@@ -98,6 +98,12 @@ export default function SatelliteDetailsModal({
                 <p className="text-lg font-semibold text-white font-mono">
                   {currentSatellite.position.alt.toFixed(0)} km
                 </p>
+                <p className="text-xs text-gray-400 font-mono">
+                  {Math.round(
+                    currentSatellite.position.alt * 3280.84
+                  ).toLocaleString()}{" "}
+                  ft
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1 font-mono">
